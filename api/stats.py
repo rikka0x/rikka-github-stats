@@ -43,7 +43,7 @@ class handler(BaseHTTPRequestHandler):
             svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="500" height="200" viewBox="0 0 500 200">
   <defs>
     <style>
-      text { font-family: 'Fira Code', monospace; }
+      text {{ font-family: 'Fira Code', monospace; }}
     </style>
   </defs>
   <rect width="500" height="200" rx="8" fill="#0f1419" stroke="#7c3aed" stroke-width="2"/>
