@@ -10,228 +10,178 @@ class handler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             params = parse_qs(parsed.query)
             username = params.get('username', ['rikka0x'])[0]
+            theme = params.get('theme', ['rikka'])[0]
             
-            # Fetch GitHub stats
-            response = requests.get(
-                f'https://api.github.com/users/{username}',
-                timeout=10,
-                headers={'Accept': 'application/vnd.github.v3+json'}
-            )
+            # Fetch GitHub user data
+            headers = {'Accept': 'application/vnd.github.v3+json'}
+            if os.environ.get('GITHUB_TOKEN'):
+                headers['Authorization'] = f'token {os.environ["GITHUB_TOKEN"]}'
             
-            if response.status_code != 200:
+            resp = requests.get(f'https://api.github.com/users/{username}', timeout=10, headers=headers)
+            if resp.status_code != 200:
                 self.send_response(404)
                 self.send_header('Content-type', 'text/plain')
                 self.end_headers()
                 self.wfile.write(b'User not found')
                 return
             
-            stats = response.json()
+            user = resp.json()
+            repos_count = user.get('public_repos', 0)
+            followers = user.get('followers', 0)
+            following = user.get('following', 0)
+            created_at = user.get('created_at', '').split('T')[0]
+            display_name = user.get('name', username) or username
+            avatar_url = user.get('avatar_url', '')
             
-            # Fetch contribution data
-            repos_count = stats.get('public_repos', 0)
-            followers = stats.get('followers', 0)
-            following = stats.get('following', 0)
-            created_at = stats.get('created_at', '').split('T')[0]
-            display_name = stats.get('name', username) or username
-            
-            # Fetch repo stars and forks
+            # Fetch repos for stars/forks
             stars_total = 0
             forks_total = 0
+            commits_total = 0
             try:
-                repos_response = requests.get(
-                    f'https://api.github.com/users/{username}/repos?per_page=100',
-                    timeout=10,
-                    headers={'Accept': 'application/vnd.github.v3+json'}
+                repos_resp = requests.get(
+                    f'https://api.github.com/users/{username}/repos?per_page=100&sort=pushed',
+                    timeout=10, headers=headers
                 )
-                if repos_response.status_code == 200:
-                    for repo in repos_response.json():
+                if repos_resp.status_code == 200:
+                    for repo in repos_resp.json():
                         stars_total += repo.get('stargazers_count', 0)
                         forks_total += repo.get('forks_count', 0)
             except:
                 pass
             
-            # Escape XML
+            # Theme presets
+            themes = {
+                'rikka': {
+                    'bg': '#0d0b1a', 'bg2': '#1a1530',
+                    'border': '#7c3aed', 'title': '#a78bfa',
+                    'text': '#e2e8f0', 'subtext': '#94a3b8',
+                    'accent': '#14b8a6', 'accent2': '#ec4899',
+                    'gold': '#fbbf24'
+                },
+                'dark': {
+                    'bg': '#0d1117', 'bg2': '#161b22',
+                    'border': '#30363d', 'title': '#58a6ff',
+                    'text': '#c9d1d9', 'subtext': '#8b949e',
+                    'accent': '#58a6ff', 'accent2': '#f778ba',
+                    'gold': '#d29922'
+                }
+            }
+            t = themes.get(theme, themes['rikka'])
+            
             def esc(s):
-                return s.replace('&', '&').replace('<', '<').replace('>', '>').replace('"', '"')
+                return str(s).replace('&', '&').replace('<', '<').replace('>', '>').replace('"', '"')
             
-            # Color palette — Rikka Takanashi theme
-            bg_dark = '#0d0b1a'
-            bg_card = '#1a1530'
-            purple = '#7c3aed'
-            purple_light = '#a78bfa'
-            teal = '#14b8a6'
-            teal_light = '#2dd4bf'
-            pink = '#ec4899'
-            text_main = '#e2e8f0'
-            text_dim = '#94a3b8'
-            gold = '#fbbf24'
+            # Progress bar widths
+            bar_max = 200
+            def bar_width(val, scale):
+                return min(val / scale * bar_max, bar_max)
             
-            # Calculate progress bar widths (max 160px)
-            repos_pct = min(repos_count / 20 * 160, 160)
-            followers_pct = min(followers / 50 * 160, 160)
-            stars_pct = min(stars_total / 50 * 160, 160)
+            # Fetch avatar from GitHub and convert to base64
+            import base64
+            avatar_b64 = ''
+            try:
+                av_resp = requests.get(avatar_url, timeout=10)
+                if av_resp.status_code == 200:
+                    avatar_b64 = base64.b64encode(av_resp.content).decode('utf-8')
+            except:
+                pass
             
-            svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="495" height="195" viewBox="0 0 495 195">
+            avatar_svg = ''
+            if avatar_b64:
+                avatar_svg = f'<image href="data:image/png;base64,{avatar_b64}" x="16" y="16" width="72" height="72" rx="8" clip-path="url(#avatarClip)"/>'
+            else:
+                # Fallback: first letter
+                avatar_svg = f'<rect x="16" y="16" width="72" height="72" rx="8" fill="{t["bg2"]}" stroke="{t["border"]}" stroke-width="1.5"/><text x="52" y="62" font-size="36" font-weight="700" fill="{t["title"]}" text-anchor="middle">{esc(display_name[0].upper())}</text>'
+            
+            svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="440" height="220" viewBox="0 0 440 220" font-family="'Segoe UI', '-apple-system', Arial, sans-serif">
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:{bg_dark};stop-opacity:1" />
-      <stop offset="100%" style="stop-color:{bg_card};stop-opacity:1" />
+      <stop offset="0%" style="stop-color:{t["bg"]}"/>
+      <stop offset="100%" style="stop-color:{t["bg2"]}"/>
     </linearGradient>
-    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:{purple};stop-opacity:1" />
-      <stop offset="100%" style="stop-color:{purple_light};stop-opacity:1" />
+    <linearGradient id="bar1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:{t["accent"]}"/>
+      <stop offset="100%" style="stop-color:{t["accent2"]}"/>
     </linearGradient>
-    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:{teal};stop-opacity:1" />
-      <stop offset="100%" style="stop-color:{teal_light};stop-opacity:1" />
+    <linearGradient id="bar2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:{t["accent2"]}"/>
+      <stop offset="100%" style="stop-color:{t["border"]}"/>
     </linearGradient>
-    <linearGradient id="pinkGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:{pink};stop-opacity:1" />
-      <stop offset="100%" style="stop-color:{purple};stop-opacity:1" />
+    <linearGradient id="bar3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:{t["gold"]}"/>
+      <stop offset="100%" style="stop-color:{t["accent"]}"/>
     </linearGradient>
-    <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" style="stop-color:{teal};stop-opacity:0.8" />
-      <stop offset="100%" style="stop-color:{teal};stop-opacity:0" />
-    </radialGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-      <feMerge>
-        <feMergeNode in="coloredBlur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+    <linearGradient id="bar4" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:{t["border"]}"/>
+      <stop offset="100%" style="stop-color:{t["title"]}"/>
+    </linearGradient>
+    <linearGradient id="topBar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:{t["accent"]}"/>
+      <stop offset="50%" style="stop-color:{t["border"]}"/>
+      <stop offset="100%" style="stop-color:{t["accent2"]}"/>
+    </linearGradient>
+    <clipPath id="avatarClip">
+      <rect x="16" y="16" width="72" height="72" rx="8"/>
+    </clipPath>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
   
-  <!-- Background -->
-  <rect width="495" height="195" rx="12" fill="url(#bgGrad)" stroke="{purple}" stroke-width="1.5" opacity="0.95"/>
+  <!-- Card background -->
+  <rect width="440" height="220" rx="12" fill="url(#bgGrad)" stroke="{t["border"]}" stroke-width="1"/>
   
-  <!-- Top gradient bar -->
-  <rect width="495" height="4" rx="12" fill="url(#purpleGrad)"/>
+  <!-- Top accent bar -->
+  <rect width="440" height="3" rx="12" fill="url(#topBar)"/>
   
-  <!-- Magic circle decoration (top-right) -->
-  <g transform="translate(440, 25)" opacity="0.15">
-    <circle cx="0" cy="0" r="22" fill="none" stroke="{purple_light}" stroke-width="1"/>
-    <circle cx="0" cy="0" r="16" fill="none" stroke="{teal}" stroke-width="0.8"/>
-    <circle cx="0" cy="0" r="10" fill="none" stroke="{purple_light}" stroke-width="0.5"/>
-    <line x1="-22" y1="0" x2="22" y2="0" stroke="{purple_light}" stroke-width="0.5"/>
-    <line x1="0" y1="-22" x2="0" y2="22" stroke="{purple_light}" stroke-width="0.5"/>
-    <line x1="-16" y1="-16" x2="16" y2="16" stroke="{teal}" stroke-width="0.5"/>
-    <line x1="-16" y1="16" x2="16" y2="-16" stroke="{teal}" stroke-width="0.5"/>
-  </g>
+  <!-- Avatar -->
+  {avatar_svg}
   
-  <!-- Rikka character silhouette (left side) -->
-  <g transform="translate(8, 12)">
-    <!-- Hair backlight (purple glow) -->
-    <ellipse cx="42" cy="35" rx="32" ry="38" fill="{purple}" opacity="0.2" filter="url(#glow)"/>
-    
-    <!-- Hair back layer (long, flowing) -->
-    <path d="M 15,50 Q 8,25 18,15 Q 25,8 35,10 Q 42,5 50,8 Q 58,5 65,12 Q 75,18 72,35 Q 75,55 70,80 Q 68,95 65,105 Q 60,115 55,118 L 25,118 Q 20,115 18,105 Q 15,90 12,75 Q 10,60 15,50 Z" fill="#1e1b3a" stroke="{purple}" stroke-width="0.8"/>
-    
-    <!-- Hair front bangs (Rikka's signature) -->
-    <path d="M 20,20 Q 22,12 30,10 Q 35,8 40,12 Q 42,8 48,10 Q 52,8 58,12 Q 65,10 70,18 Q 72,25 68,32 Q 65,28 62,30 Q 58,26 55,30 Q 52,26 48,30 Q 45,26 42,30 Q 38,26 35,30 Q 32,26 28,30 Q 25,28 22,32 Q 18,28 20,20 Z" fill="#2a1f4a" stroke="{purple_light}" stroke-width="0.5"/>
-    
-    <!-- Face -->
-    <ellipse cx="45" cy="40" rx="16" ry="18" fill="#f5e6d3" opacity="0.95"/>
-    
-    <!-- Eye patch (Rikka's signature right eye) -->
-    <g transform="translate(52, 35)">
-      <rect x="-5" y="-3" width="12" height="7" rx="2" fill="{bg_dark}" stroke="{teal}" stroke-width="0.8"/>
-      <line x1="-7" y1="0" x2="7" y2="0" stroke="{teal}" stroke-width="1.5" filter="url(#glow)"/>
-      <circle cx="0" cy="0" r="5" fill="url(#eyeGlow)"/>
-    </g>
-    
-    <!-- Left eye ( visible, teal-colored) -->
-    <g transform="translate(38, 38)">
-      <ellipse cx="0" cy="0" rx="3.5" ry="4.5" fill="white" stroke="{purple}" stroke-width="0.5"/>
-      <circle cx="0" cy="0" r="2.5" fill="{teal}" filter="url(#glow)"/>
-      <circle cx="0" cy="-0.5" r="1" fill="white"/>
-    </g>
-    
-    <!-- Small smile -->
-    <path d="M 40,50 Q 45,53 50,50" fill="none" stroke="#c08484" stroke-width="1" stroke-linecap="round"/>
-    
-    <!-- Hair strand accents (yellow ribbon tie) -->
-    <g transform="translate(25, 18)">
-      <path d="M 0,0 L -5,-4 L -3,2 L -7,4 L 2,3 Z" fill="{gold}" opacity="0.9"/>
-    </g>
-    <g transform="translate(68, 20)">
-      <path d="M 0,0 L 5,-4 L 3,2 L 7,4 L -2,3 Z" fill="{gold}" opacity="0.9"/>
-    </g>
-    
-    <!-- Magical sparkles around character -->
-    <g opacity="0.6">
-      <text x="5" y="15" font-size="8" fill="{teal}">&#10022;</text>
-      <text x="75" y="50" font-size="6" fill="{purple_light}">&#10022;</text>
-      <text x="3" y="70" font-size="5" fill="{pink}">&#10022;</text>
-      <text x="72" y="85" font-size="7" fill="{teal}">&#10022;</text>
-    </g>
-  </g>
+  <!-- Name & username -->
+  <text x="100" y="40" font-size="18" font-weight="700" fill="{t["title"]}">{esc(display_name)}</text>
+  <text x="100" y="58" font-size="12" fill="{t["subtext"]}">@{esc(username)}</text>
+  <text x="100" y="76" font-size="10" fill="{t["text"]}">Since {created_at}</text>
   
-  <!-- Divider line -->
-  <line x1="100" y1="15" x2="100" y2="180" stroke="{purple}" stroke-width="0.5" opacity="0.3"/>
+  <!-- Divider -->
+  <line x1="16" y1="100" x2="424" y2="100" stroke="{t["border"]}" stroke-width="0.5" opacity="0.3"/>
   
-  <!-- Header text -->
-  <text x="115" y="30" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="700" fill="{purple_light}" filter="url(#glow)">&#9881; GitHub Stats</text>
-  <text x="115" y="47" font-family="'Fira Code', monospace" font-size="12" font-weight="600" fill="{text_main}">{esc(display_name)}</text>
-  <text x="115" y="62" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">@{esc(username)}</text>
-  
-  <!-- Stats with progress bars -->
+  <!-- Stats with bars -->
   <!-- Repositories -->
-  <g transform="translate(115, 75)">
-    <text x="0" y="0" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">Repositories</text>
-    <text x="160" y="0" font-family="'Fira Code', monospace" font-size="12" font-weight="700" fill="{teal_light}" text-anchor="end">{repos_count}</text>
-    <rect x="0" y="5" width="160" height="4" rx="2" fill="{bg_dark}" stroke="{purple}" stroke-width="0.3" opacity="0.5"/>
-    <rect x="0" y="5" width="{repos_pct:.0f}" height="4" rx="2" fill="url(#tealGrad)"/>
+  <g transform="translate(16, 115)">
+    <circle cx="6" cy="-2" r="4" fill="{t["accent"]}"/>
+    <text x="18" y="2" font-size="11" fill="{t["subtext"]}">Repositories</text>
+    <text x="408" y="2" font-size="14" font-weight="700" fill="{t["text"]}" text-anchor="end">{repos_count}</text>
+    <rect x="0" y="8" width="408" height="5" rx="2.5" fill="{t["bg"]}" opacity="0.6"/>
+    <rect x="0" y="8" width="{bar_width(repos_count, 30):.0f}" height="5" rx="2.5" fill="url(#bar1)"/>
   </g>
   
   <!-- Followers -->
-  <g transform="translate(290, 75)">
-    <text x="0" y="0" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">Followers</text>
-    <text x="170" y="0" font-family="'Fira Code', monospace" font-size="12" font-weight="700" fill="{purple_light}" text-anchor="end">{followers}</text>
-    <rect x="0" y="5" width="170" height="4" rx="2" fill="{bg_dark}" stroke="{purple}" stroke-width="0.3" opacity="0.5"/>
-    <rect x="0" y="5" width="{followers_pct:.0f}" height="4" rx="2" fill="url(#purpleGrad)"/>
+  <g transform="translate(16, 140)">
+    <circle cx="6" cy="-2" r="4" fill="{t["accent2"]}"/>
+    <text x="18" y="2" font-size="11" fill="{t["subtext"]}">Followers</text>
+    <text x="408" y="2" font-size="14" font-weight="700" fill="{t["text"]}" text-anchor="end">{followers}</text>
+    <rect x="0" y="8" width="408" height="5" rx="2.5" fill="{t["bg"]}" opacity="0.6"/>
+    <rect x="0" y="8" width="{bar_width(followers, 50):.0f}" height="5" rx="2.5" fill="url(#bar2)"/>
   </g>
   
   <!-- Stars -->
-  <g transform="translate(115, 100)">
-    <text x="0" y="0" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">Total Stars</text>
-    <text x="160" y="0" font-family="'Fira Code', monospace" font-size="12" font-weight="700" fill="{gold}" text-anchor="end">&#9733; {stars_total}</text>
-    <rect x="0" y="5" width="160" height="4" rx="2" fill="{bg_dark}" stroke="{purple}" stroke-width="0.3" opacity="0.5"/>
-    <rect x="0" y="5" width="{stars_pct:.0f}" height="4" rx="2" fill="{gold}" opacity="0.8"/>
-  </g>
-  
-  <!-- Following -->
-  <g transform="translate(290, 100)">
-    <text x="0" y="0" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">Following</text>
-    <text x="170" y="0" font-family="'Fira Code', monospace" font-size="12" font-weight="700" fill="{pink}" text-anchor="end">{following}</text>
-    <rect x="0" y="5" width="170" height="4" rx="2" fill="{bg_dark}" stroke="{purple}" stroke-width="0.3" opacity="0.5"/>
-    <rect x="0" y="5" width="{min(following / 30 * 170, 170):.0f}" height="4" rx="2" fill="url(#pinkGrad)"/>
+  <g transform="translate(16, 165)">
+    <circle cx="6" cy="-2" r="4" fill="{t["gold"]}"/>
+    <text x="18" y="2" font-size="11" fill="{t["subtext"]}">Total Stars</text>
+    <text x="408" y="2" font-size="14" font-weight="700" fill="{t["gold"]}" text-anchor="end">&#9733; {stars_total}</text>
+    <rect x="0" y="8" width="408" height="5" rx="2.5" fill="{t["bg"]}" opacity="0.6"/>
+    <rect x="0" y="8" width="{bar_width(stars_total, 50):.0f}" height="5" rx="2.5" fill="url(#bar3)"/>
   </g>
   
   <!-- Forks -->
-  <g transform="translate(115, 125)">
-    <text x="0" y="0" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">Forks</text>
-    <text x="160" y="0" font-family="'Fira Code', monospace" font-size="12" font-weight="700" fill="{teal_light}" text-anchor="end">{forks_total}</text>
-    <rect x="0" y="5" width="160" height="4" rx="2" fill="{bg_dark}" stroke="{purple}" stroke-width="0.3" opacity="0.5"/>
-    <rect x="0" y="5" width="{min(forks_total / 20 * 160, 160):.0f}" height="4" rx="2" fill="url(#tealGrad)"/>
+  <g transform="translate(16, 190)">
+    <circle cx="6" cy="-2" r="4" fill="{t["border"]}"/>
+    <text x="18" y="2" font-size="11" fill="{t["subtext"]}">Forks</text>
+    <text x="408" y="2" font-size="14" font-weight="700" fill="{t["text"]}" text-anchor="end">{forks_total}</text>
+    <rect x="0" y="8" width="408" height="5" rx="2.5" fill="{t["bg"]}" opacity="0.6"/>
+    <rect x="0" y="8" width="{bar_width(forks_total, 20):.0f}" height="5" rx="2.5" fill="url(#bar4)"/>
   </g>
-  
-  <!-- Joined date -->
-  <g transform="translate(290, 125)">
-    <text x="0" y="0" font-family="'Fira Code', monospace" font-size="10" fill="{text_dim}">Joined</text>
-    <text x="170" y="0" font-family="'Fira Code', monospace" font-size="12" font-weight="600" fill="{text_main}" text-anchor="end">{created_at}</text>
-  </g>
-  
-  <!-- Bottom decoration: magic circle + text -->
-  <g transform="translate(135, 165)" opacity="0.7">
-    <circle cx="0" cy="0" r="6" fill="none" stroke="{purple_light}" stroke-width="0.5"/>
-    <circle cx="0" cy="0" r="3" fill="none" stroke="{teal}" stroke-width="0.3"/>
-    <text x="12" y="4" font-family="'Fira Code', monospace" font-size="9" fill="{purple_light}" font-style="italic">&#10024; Wielder of the Tyrant's Eye &#10024;</text>
-  </g>
-  
-  <!-- Corner accents -->
-  <polygon points="480,195 495,195 495,180" fill="{purple}" opacity="0.5"/>
-  <polygon points="0,195 0,180 15,195" fill="{teal}" opacity="0.3"/>
   
 </svg>'''
             
