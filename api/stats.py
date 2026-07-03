@@ -34,16 +34,21 @@ class handler(BaseHTTPRequestHandler):
             following = stats.get('following', 0)
             created_at = stats.get('created_at', '').split('T')[0]
             
+            display_name = stats.get('name', username)
+            if display_name and display_name != username:
+                display_name = display_name.replace('&', '&')
+            else:
+                display_name = f'@{username}'
+            
             svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="500" height="200" viewBox="0 0 500 200">
   <defs>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap');
-      text {{ font-family: 'Fira Code', monospace; }}
+      text { font-family: 'Fira Code', monospace; }
     </style>
   </defs>
   <rect width="500" height="200" rx="8" fill="#0f1419" stroke="#7c3aed" stroke-width="2"/>
   <line x1="0" y1="8" x2="500" y2="8" stroke="#7c3aed" stroke-width="2"/>
-  <text x="20" y="35" font-size="24" font-weight="600" fill="#7c3aed">@{username}</text>
+  <text x="20" y="35" font-size="24" font-weight="600" fill="#7c3aed">{display_name}</text>
   <text x="20" y="55" font-size="12" fill="#e5e7eb">GitHub Stats</text>
   <g>
     <circle cx="80" cy="110" r="8" fill="#14b8a6"/>
