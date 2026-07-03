@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/stats.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "env": {},
+  "buildCommand": "pip install -r requirements.txt || true"
+}
